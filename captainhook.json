@@ -5,9 +5,11 @@
         "ansi-colors": true,
         "git-directory": ".git",
         "includes": [],
-        "run-mode": "shell",
-        "run-cmd": "tools/captainhook",
-        "bootstrap": "vendor/autoload.php"
+        "bootstrap": "vendor/autoload.php",
+        "run": {
+            "mode": "docker",
+            "exec": "./vendor/bin/sail exec laravel.test"
+        }
     },
     "commit-msg": {
         "enabled": false,
