@@ -10,16 +10,24 @@ Para usar este template en un proyecto nuevo: botón **"Use this template"** en 
 
 ## Setup local
 
-Requisitos: Docker + Docker Compose.
+**Único requisito: Docker (+ Docker Compose).** No hace falta PHP, Composer ni Node instalados en el host — todo, incluyendo el bootstrap inicial, corre en contenedores. Esto es intencional: cualquier dev nuevo tiene que poder levantar el proyecto con una instalación mínima de Docker, nada más.
 
 ```bash
 cp .env.example .env
-composer install          # también instala los git hooks (CaptainHook) automáticamente
+
+# Bootstrap: instala las dependencias de Composer sin necesitar PHP en el host
+# (necesario una sola vez, antes de que exista ./vendor/bin/sail)
+docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -v "$(pwd):/var/www/html" \
+    -w /var/www/html \
+    composer:2 composer install --ignore-platform-reqs
+
 ./vendor/bin/sail up -d
-sail artisan key:generate
-sail artisan migrate
-sail npm install
-sail npm run dev
+./vendor/bin/sail artisan key:generate
+./vendor/bin/sail artisan migrate
+./vendor/bin/sail npm install
+./vendor/bin/sail npm run dev
 ```
 
 La app queda en `http://localhost`. Mailpit (para ver los mails enviados en dev) queda en `http://localhost:8025`.
@@ -34,10 +42,12 @@ sail down                  # apagar los contenedores
 
 ## Git hooks (CaptainHook)
 
-Se instalan solos al correr `composer install` (plugin `captainhook/plugin-composer`). Configuración en [`captainhook.json`](./captainhook.json):
+Se instalan solos con el `composer install` del bootstrap (plugin `captainhook/plugin-composer`). Configuración en [`captainhook.json`](./captainhook.json):
 
 - **pre-commit**: corre `pint --test` (chequeo de estilo, rápido).
 - **pre-push**: corre la suite completa de tests (`php artisan test`). Si falla, bloquea el push.
+
+Importante: los hooks **corren dentro del contenedor `laravel.test`**, no en el host (`captainhook.json` → `config.run.mode: "docker"`, ejecuta vía `./vendor/bin/sail exec laravel.test`). Esto es lo que permite que un dev nuevo nunca necesite PHP instalado localmente — pero como contrapartida, **Sail tiene que estar levantado (`sail up -d`) para poder commitear o pushear**; si los contenedores están abajo, el hook falla con `service "laravel.test" is not running` en vez de silenciosamente saltarse el chequeo.
 
 Si necesitás saltarte un hook puntualmente: `git commit --no-verify` / `git push --no-verify`. Igual te va a frenar el gate de CI, así que solo tiene sentido para iterar localmente.
 
