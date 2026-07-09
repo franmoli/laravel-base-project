@@ -1,0 +1,58 @@
+{
+    "config": {
+        "verbosity": "normal",
+        "fail-on-first-error": true,
+        "ansi-colors": true,
+        "git-directory": ".git",
+        "includes": [],
+        "run-mode": "shell",
+        "run-cmd": "tools/captainhook",
+        "bootstrap": "vendor/autoload.php"
+    },
+    "commit-msg": {
+        "enabled": false,
+        "actions": []
+    },
+    "pre-commit": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "vendor/bin/pint --test",
+                "config": {
+                    "label": "Check code style (Pint)"
+                }
+            }
+        ]
+    },
+    "pre-push": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "php artisan test",
+                "config": {
+                    "label": "Run full test suite"
+                }
+            }
+        ]
+    },
+    "post-checkout": {
+        "enabled": false,
+        "actions": []
+    },
+    "post-merge": {
+        "enabled": false,
+        "actions": []
+    },
+    "post-rewrite": {
+        "enabled": false,
+        "actions": []
+    },
+    "post-commit": {
+        "enabled": false,
+        "actions": []
+    },
+    "prepare-commit-msg": {
+        "enabled": false,
+        "actions": []
+    }
+}
