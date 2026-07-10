@@ -75,7 +75,11 @@ jobs:
 
   deploy:
     needs: tests
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Se salta (no falla) si no hay secrets de Hostinger cargados, como en
+    # este propio repo template — donde no hay servidor real al que
+    # deployar. Un proyecto creado a partir del template empieza a
+    # deployar solo apenas se cargan los secrets, sin tocar este workflow.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.SSH_HOST != ''
     runs-on: ubuntu-latest
     environment: production
 

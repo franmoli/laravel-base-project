@@ -140,6 +140,8 @@ Si necesitás saltarte un hook puntualmente: `git commit --no-verify` / `git pus
 
 `.github/workflows/ci.yml`, job `tests`: corre en cada push/PR a `main` — Pint, Larastan (análisis estático) y la suite de tests contra un MySQL de servicio. El job `deploy` depende de `tests` (`needs: tests`), así que nunca se despliega código que no pasa el gate.
 
+El job `deploy` se **salta solo** (queda gris, no rojo) si no está cargado el secret `SSH_HOST` — por eso en este propio repo template, que no tiene un servidor real al que deployar, no vas a ver una X roja al pushear a `main`. En un proyecto creado a partir del template, apenas cargues los secrets de Hostinger (ver más abajo) el job empieza a correr solo, sin tener que tocar el workflow.
+
 **Dependabot** ([`.github/dependabot.yml`](./.github/dependabot.yml)) revisa una vez por semana `composer.lock`, `package-lock.json` y las versiones de las GitHub Actions usadas, y abre PRs automáticos para actualizarlas (agrupando minor/patch en un solo PR para no generar demasiado ruido; los majors llegan aparte). Cada PR que abra pasa por el mismo gate de `tests` antes de poder mergearse.
 
 ## Deploy a Hostinger (hPanel, shared hosting)
