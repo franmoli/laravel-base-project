@@ -61,6 +61,10 @@ docker run --rm \
 ./vendor/bin/sail npm run dev
 ```
 
+### VS Code Dev Containers (opcional)
+
+Si preferís trabajar con la extensión [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) de VS Code en vez de la CLI de Sail directamente, el repo ya trae [`.devcontainer/devcontainer.json`](./.devcontainer/devcontainer.json) apuntando al mismo `compose.yaml` (servicio `laravel.test`) — "Reopen in Container" y listo, con extensiones de Laravel recomendadas preinstaladas. Es 100% opcional: no reemplaza a `start.sh`, es solo otra forma de entrar al mismo contenedor.
+
 ### Comandos útiles
 
 > Los ejemplos usan `sail` a secas — si no querés escribir `./vendor/bin/sail` cada vez, agregá `alias sail='[ -f sail ] && sh sail || sh vendor/bin/sail'` a tu `~/.bashrc` / `~/.zshrc`.
@@ -87,6 +91,10 @@ docker run --rm \
 | `sail php ./vendor/bin/phpstan analyse` | Análisis estático (Larastan) |
 | `sail artisan down` / `sail artisan up` | Activa / sale del modo mantenimiento |
 | `sail artisan optimize:clear` | Limpia todos los cachés |
+| `sail artisan queue:listen` | Worker de colas para desarrollo (recarga código en cada job) |
+| `sail artisan schedule:work` | Corre el scheduler en foreground, simulando el cron de producción |
+| `sail artisan ide-helper:generate` | Genera `_ide_helper.php` (autocompletado de facades) |
+| `sail artisan ide-helper:models -N` | Genera `_ide_helper_models.php` (autocompletado de modelos, sin tocar los archivos reales) |
 | `./local-url.sh` | Apunta el proyecto a la IP local actual (acceso desde el celular, etc.) |
 | `./local-url.sh --reset` | Vuelve a `http://localhost` |
 
@@ -112,6 +120,11 @@ Esto actualiza `APP_URL` y `VITE_HOST` en `.env`, y limpia la config cacheada. C
 
 **Por qué es un script del host y no directamente `sail artisan app:local-url`**: el comando Artisan (`app/Console/Commands/SetLocalUrl.php`) corre dentro del contenedor si se invoca vía `sail`, y ahí solo ve la IP interna de Docker, no la IP real de la red local — por eso la detección de IP vive en `local-url.sh` (que corre en el host) y le pasa el resultado al comando Artisan. Si preferís, también podés pasarle la IP vos mismo: `sail artisan app:local-url 192.168.1.50`.
 
+### Jobs, colas y tareas programadas en desarrollo
+
+- **Colas**: `QUEUE_CONNECTION=database` por defecto (sin Redis, ver nota en la sección de Hostinger más abajo sobre por qué). Si tu app despacha Jobs, corré un worker en otra terminal para que se procesen: `sail artisan queue:listen` (recarga el código en cada job, ideal para desarrollo — a diferencia de `queue:work`, que hay que reiniciar a mano después de cada cambio).
+- **Scheduler**: si usás `Schedule::command(...)` en `routes/console.php`, `sail artisan schedule:work` corre en foreground y dispara las tareas programadas como lo haría el cron en producción, sin tener que esperar al minuto real.
+
 ## Git hooks (CaptainHook)
 
 Se instalan solos con el `composer install` del bootstrap (plugin `captainhook/plugin-composer`). Configuración en [`captainhook.json`](./captainhook.json):
@@ -126,6 +139,8 @@ Si necesitás saltarte un hook puntualmente: `git commit --no-verify` / `git pus
 ## CI (GitHub Actions)
 
 `.github/workflows/ci.yml`, job `tests`: corre en cada push/PR a `main` — Pint, Larastan (análisis estático) y la suite de tests contra un MySQL de servicio. El job `deploy` depende de `tests` (`needs: tests`), así que nunca se despliega código que no pasa el gate.
+
+**Dependabot** ([`.github/dependabot.yml`](./.github/dependabot.yml)) revisa una vez por semana `composer.lock`, `package-lock.json` y las versiones de las GitHub Actions usadas, y abre PRs automáticos para actualizarlas (agrupando minor/patch en un solo PR para no generar demasiado ruido; los majors llegan aparte). Cada PR que abra pasa por el mismo gate de `tests` antes de poder mergearse.
 
 ## Deploy a Hostinger (hPanel, shared hosting)
 
@@ -155,6 +170,17 @@ El deploy (job `deploy` en `ci.yml`) en cada push a `main`:
 5. Por SSH al servidor: clonar el repo dentro de `public_html/` (si ya tiene contenido del panel, vaciarlo antes o inicializar el repo ahí con `git init` + `remote add` + `pull`).
 6. Crear a mano el `.env` de producción dentro de `public_html/` (queda gitignored — el pipeline nunca lo toca ni lo sobreescribe).
 7. Dar permisos de escritura a `storage/` y `bootstrap/cache/` (`chmod -R` para el usuario de PHP-FPM).
+8. Si el proyecto usa tareas programadas (`Schedule::command(...)` en `routes/console.php`): en hPanel → Advanced → Cron Jobs, agregar una entrada que corra cada minuto:
+   ```
+   * * * * * cd /ruta/a/public_html && php artisan schedule:run >> /dev/null 2>&1
+   ```
+9. Si el proyecto despacha Jobs a una cola: hPanel no permite un worker persistente (`queue:work` corriendo 24/7, tal como tampoco permite alojar Redis — ver nota más abajo), así que se procesa por cron en vez de por daemon:
+   ```
+   * * * * * cd /ruta/a/public_html && php artisan queue:work --stop-when-empty --max-time=50 >> /dev/null 2>&1
+   ```
+   Esto corre, procesa lo que haya en cola hasta ~50s, corta, y el cron lo vuelve a disparar al minuto siguiente.
+
+> **¿Por qué no Redis?** Hostinger hPanel (shared hosting) no permite correr procesos daemon propios, así que no se puede alojar Redis ahí. La cola con `QUEUE_CONNECTION=database` (el default de este template) funciona bien sin Redis para volúmenes bajos/medios. Si un proyecto necesita Redis igual, la opción que no obliga a migrar a un VPS es un Redis administrado externo (Upstash, Redis Cloud, etc.), accesible por red desde la app.
 
 ### Secrets a cargar en GitHub (Settings → Secrets and variables → Actions)
 
