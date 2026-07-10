@@ -12,6 +12,37 @@ Para usar este template en un proyecto nuevo: botón **"Use this template"** en 
 
 **Único requisito: Docker (+ Docker Compose).** No hace falta PHP, Composer ni Node instalados en el host — todo, incluyendo el bootstrap inicial, corre en contenedores. Esto es intencional: cualquier dev nuevo tiene que poder levantar el proyecto con una instalación mínima de Docker, nada más.
 
+### Arranque en un solo comando
+
+```bash
+./start.sh          # Linux / macOS / WSL2
+start.bat            # Windows (delega en WSL2, ver nota más abajo)
+```
+
+`start.sh` es idempotente — se puede correr las veces que haga falta:
+
+1. Crea `.env` desde `.env.example` si no existe.
+2. Si no existe `./vendor/bin/sail` todavía, instala las dependencias de Composer con un contenedor descartable de `composer:2` (sin depender de PHP en el host).
+3. Levanta los contenedores (`sail up -d`) y espera a que MySQL pase el healthcheck.
+4. Genera `APP_KEY` si falta, corre las migraciones.
+5. Instala dependencias de Node si falta `node_modules`.
+6. Deja corriendo `sail npm run dev` (Vite) en primer plano — `Ctrl+C` corta solo el watcher, los contenedores siguen arriba (`./vendor/bin/sail down` para apagarlos del todo).
+
+La app queda en `http://localhost`. Mailpit (para ver los mails enviados en dev) queda en `http://localhost:8025`.
+
+#### Instalación en Windows
+
+Laravel Sail solo corre sobre **WSL2** en Windows (Docker Desktop expone el motor ahí, no en Windows nativo). `start.bat` delega la ejecución real a `start.sh` dentro de tu distro de WSL2, pero primero necesitás:
+
+1. Instalar WSL2 desde PowerShell como administrador: `wsl --install` (reiniciar al terminar).
+2. En Docker Desktop → Settings → General, activar **"Use the WSL 2 based engine"**; en Settings → Resources → WSL Integration, habilitar la integración con tu distro.
+3. Clonar el repo **dentro del filesystem de Linux** de WSL2 (`~/proyectos/...`), no en `/mnt/c/...` — trabajar sobre la unidad de Windows montada degrada I/O severamente y puede romper Vite/Artisan.
+4. Correr `start.bat` (o directamente `./start.sh` desde una terminal de WSL2, que es lo mismo).
+
+Si ves el error `error getting credentials` al levantar Sail desde WSL2: editá `~/.docker/config.json` dentro de la distro y reemplazá el contenido por `{}` (elimina la clave `credsStore`, que apunta a un helper que no existe ahí).
+
+### Paso a paso manual (equivalente a lo que hace `start.sh`)
+
 ```bash
 cp .env.example .env
 
@@ -30,15 +61,34 @@ docker run --rm \
 ./vendor/bin/sail npm run dev
 ```
 
-La app queda en `http://localhost`. Mailpit (para ver los mails enviados en dev) queda en `http://localhost:8025`.
+### Comandos útiles
 
-Comandos frecuentes:
+> Los ejemplos usan `sail` a secas — si no querés escribir `./vendor/bin/sail` cada vez, agregá `alias sail='[ -f sail ] && sh sail || sh vendor/bin/sail'` a tu `~/.bashrc` / `~/.zshrc`.
 
-```bash
-sail artisan test          # correr tests
-sail artisan tinker
-sail down                  # apagar los contenedores
-```
+| Comando | Descripción |
+|---|---|
+| `sail up -d` | Levanta los contenedores en segundo plano |
+| `sail down` | Detiene y elimina los contenedores |
+| `sail down -v` | Ídem, y borra también el volumen de MySQL (reset total de la DB) |
+| `sail restart` | Reinicia los contenedores |
+| `sail artisan migrate` | Ejecuta las migraciones |
+| `sail artisan migrate:fresh --seed` | Reinicia la base de datos y ejecuta los seeders |
+| `sail artisan tinker` | Consola interactiva de Laravel |
+| `sail npm run dev` | Compila los assets en modo desarrollo (watch) |
+| `sail npm run build` | Compila los assets para producción |
+| `sail logs -f` | Logs de los contenedores en tiempo real |
+| `sail shell` / `sail bash` | Abre una shell dentro del contenedor de la app |
+| `sail mysql` | Consola de MySQL |
+| `sail composer install` | Dependencias de PHP (ya dentro del contenedor) |
+| `sail npm install` | Dependencias de Node |
+| `sail test` | Corre la suite de tests (`php artisan test`) |
+| `sail pint --test` | Chequeo de estilo (Pint), sin corregir |
+| `sail pint` | Corrige el estilo automáticamente |
+| `sail php ./vendor/bin/phpstan analyse` | Análisis estático (Larastan) |
+| `sail artisan down` / `sail artisan up` | Activa / sale del modo mantenimiento |
+| `sail artisan optimize:clear` | Limpia todos los cachés |
+
+> **Puerto 3306 ocupado**: si tenés un MySQL local corriendo en el host, va a chocar con el `mysql` de Sail. Frenalo antes de levantar los contenedores (`sudo systemctl stop mysql` en Linux, `sudo service mysql stop` en WSL2) o cambiá `FORWARD_DB_PORT` en tu `.env`.
 
 ## Git hooks (CaptainHook)
 
