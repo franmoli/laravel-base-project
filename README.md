@@ -87,8 +87,30 @@ docker run --rm \
 | `sail php ./vendor/bin/phpstan analyse` | Análisis estático (Larastan) |
 | `sail artisan down` / `sail artisan up` | Activa / sale del modo mantenimiento |
 | `sail artisan optimize:clear` | Limpia todos los cachés |
+| `./local-url.sh` | Apunta el proyecto a la IP local actual (acceso desde el celular, etc.) |
+| `./local-url.sh --reset` | Vuelve a `http://localhost` |
 
 > **Puerto 3306 ocupado**: si tenés un MySQL local corriendo en el host, va a chocar con el `mysql` de Sail. Frenalo antes de levantar los contenedores (`sudo systemctl stop mysql` en Linux, `sudo service mysql stop` en WSL2) o cambiá `FORWARD_DB_PORT` en tu `.env`.
+
+### Acceso desde otros dispositivos de la red local
+
+Como en un entorno local es común que la IP de la máquina cambie (reinicios, redes distintas, etc.), el template trae un comando para apuntar el proyecto a la IP actual y poder abrirlo desde el celular u otro equipo de la misma red:
+
+```bash
+./local-url.sh                  # autodetecta la IP del host y la aplica
+./local-url.sh 192.168.1.50     # o la pasás a mano
+./local-url.sh --reset          # vuelve a http://localhost
+```
+
+En Windows: `local-url.bat` (misma idea, delega en WSL2).
+
+Esto actualiza `APP_URL` y `VITE_HOST` en `.env`, y limpia la config cacheada. Con eso:
+
+- La app queda accesible en `http://<tu-ip>` desde cualquier dispositivo de la misma red.
+- `vite.config.js` usa `VITE_HOST` para que Vite escuche en todas las interfaces y le diga al navegador la IP correcta para el cliente de HMR (sin esto, el celular intentaría conectar el HMR a "localhost", que en el celular es él mismo, no tu máquina) — ver comentario en `vite.config.js`.
+- Si `sail npm run dev` ya estaba corriendo, hay que reiniciarlo para que tome el nuevo host.
+
+**Por qué es un script del host y no directamente `sail artisan app:local-url`**: el comando Artisan (`app/Console/Commands/SetLocalUrl.php`) corre dentro del contenedor si se invoca vía `sail`, y ahí solo ve la IP interna de Docker, no la IP real de la red local — por eso la detección de IP vive en `local-url.sh` (que corre en el host) y le pasa el resultado al comando Artisan. Si preferís, también podés pasarle la IP vos mismo: `sail artisan app:local-url 192.168.1.50`.
 
 ## Git hooks (CaptainHook)
 
