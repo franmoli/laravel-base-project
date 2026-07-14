@@ -2,12 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 env:
   PHP_VERSION: '8.5'
+  # Hosting compartido de Hostinger (CloudLinux) resuelve el `php`/`composer`
+  # del PATH a una versión vieja (8.0). Los binarios reales por versión
+  # viven en /opt/alt/phpXX/usr/bin/. Si el servidor de deploy no es
+  # Hostinger shared hosting, ajustá estos dos valores (o dejalos en
+  # simplemente "php"/"composer" si el PATH remoto ya resuelve bien).
+  SERVER_PHP_BIN: /opt/alt/php83/usr/bin/php
+  SERVER_COMPOSER_BIN: /opt/alt/php83/usr/bin/composer
 
 jobs:
   tests:
@@ -75,35 +82,43 @@ jobs:
 
   deploy:
     needs: tests
-    # Se salta (no falla) si no hay secrets de Hostinger cargados, como en
-    # este propio repo template — donde no hay servidor real al que
-    # deployar. Un proyecto creado a partir del template empieza a
-    # deployar solo apenas se cargan los secrets, sin tocar este workflow.
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.SSH_HOST != ''
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
 
     steps:
+      - name: Check Hostinger secrets are configured
+        id: check
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: echo "ready=${{ env.SSH_HOST != '' }}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'true'
 
       - uses: shivammathur/setup-php@v2
+        if: steps.check.outputs.ready == 'true'
         with:
           php-version: ${{ env.PHP_VERSION }}
 
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Install Composer dependencies
+        if: steps.check.outputs.ready == 'true'
         run: composer install --no-progress --prefer-dist --ansi
 
       - name: Build frontend assets
+        if: steps.check.outputs.ready == 'true'
         run: |
           npm ci
           npm run build
 
       - name: Upload built assets
+        if: steps.check.outputs.ready == 'true'
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -124,7 +139,13 @@ jobs:
           rm -f /tmp/deploy_key
 
       - name: Deploy over SSH
+        if: steps.check.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1
+        env:
+          # appleboy/ssh-action reenvía al servidor remoto las variables
+          # listadas en `envs:`, pero deben existir en el env: de este
+          # mismo step — no se heredan del step anterior.
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         with:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT }}
@@ -134,13 +155,100 @@ jobs:
           script: |
             set -e
             cd "$DEPLOY_PATH"
-            php artisan down --render="errors::503" --retry=60 || true
+            PHP=${{ env.SERVER_PHP_BIN }}
+            COMPOSER=${{ env.SERVER_COMPOSER_BIN }}
+            $PHP artisan down --render="errors::503" --retry=60 || true
             git pull origin main --ff-only
-            composer install --no-dev --prefer-dist --optimize-autoloader
-            php artisan migrate --force
-            php artisan optimize:clear
-            php artisan config:cache
-            php artisan route:cache
-            php artisan view:cache
-            php artisan queue:restart || true
-            php artisan up
+            $COMPOSER install --no-dev --prefer-dist --optimize-autoloader
+            $PHP artisan migrate --force
+            $PHP artisan optimize:clear
+            $PHP artisan config:cache
+            $PHP artisan route:cache
+            $PHP artisan view:cache
+            $PHP artisan queue:restart || true
+            $PHP artisan up
+
+  deploy-staging:
+    needs: tests
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Check Hostinger secrets are configured
+        id: check
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: echo "ready=${{ env.SSH_HOST != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'true'
+
+      - uses: shivammathur/setup-php@v2
+        if: steps.check.outputs.ready == 'true'
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Composer dependencies
+        if: steps.check.outputs.ready == 'true'
+        run: composer install --no-progress --prefer-dist --ansi
+
+      - name: Build frontend assets
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload built assets
+        if: steps.check.outputs.ready == 'true'
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          echo "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          for attempt in 1 2 3; do
+            rsync -az --delete \
+              -e "ssh -i /tmp/deploy_key -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30" \
+              public/build/ \
+              "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/build/" \
+            && { echo "Upload succeeded on attempt $attempt"; break; } \
+            || { echo "Attempt $attempt failed"; [ $attempt -lt 3 ] && sleep 15; }
+          done
+          rm -f /tmp/deploy_key
+
+      - name: Deploy over SSH
+        if: steps.check.outputs.ready == 'true'
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: DEPLOY_PATH
+          script: |
+            set -e
+            cd "$DEPLOY_PATH"
+            PHP=${{ env.SERVER_PHP_BIN }}
+            COMPOSER=${{ env.SERVER_COMPOSER_BIN }}
+            $PHP artisan down --render="errors::503" --retry=60 || true
+            git pull origin dev --ff-only
+            $COMPOSER install --no-dev --prefer-dist --optimize-autoloader
+            $PHP artisan migrate --force
+            $PHP artisan optimize:clear
+            $PHP artisan config:cache
+            $PHP artisan route:cache
+            $PHP artisan view:cache
+            $PHP artisan queue:restart || true
+            $PHP artisan up
