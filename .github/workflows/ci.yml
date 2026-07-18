@@ -128,45 +128,58 @@ jobs:
         run: |
           echo "$SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
-          for attempt in 1 2 3; do
+          # Hostinger (shared hosting) puede aplicar bloqueos temporales por
+          # IP en su gateway SSH, o el nodo compartido puede tener picos de
+          # carga que hacen expirar el ConnectTimeout. Backoff creciente
+          # (30s/60s/120s) para dar margen real a que eso se resuelva solo,
+          # en vez de 3 reintentos pegados que fallan siempre igual.
+          for attempt in 1 2 3 4; do
             rsync -az --delete \
               -e "ssh -i /tmp/deploy_key -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30" \
               public/build/ \
               "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/build/" \
             && { echo "Upload succeeded on attempt $attempt"; break; } \
-            || { echo "Attempt $attempt failed"; [ $attempt -lt 3 ] && sleep 15; }
+            || { echo "Attempt $attempt failed"; [ $attempt -lt 4 ] && sleep $((30 * attempt)); }
           done
           rm -f /tmp/deploy_key
 
       - name: Deploy over SSH
         if: steps.check.outputs.ready == 'true'
-        uses: appleboy/ssh-action@v1
         env:
-          # appleboy/ssh-action reenvía al servidor remoto las variables
-          # listadas en `envs:`, pero deben existir en el env: de este
-          # mismo step — no se heredan del step anterior.
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          envs: DEPLOY_PATH
-          script: |
-            set -e
-            cd "$DEPLOY_PATH"
-            PHP=${{ env.SERVER_PHP_BIN }}
-            COMPOSER=${{ env.SERVER_COMPOSER_BIN }}
-            $PHP artisan down --render="errors::503" --retry=60 || true
-            git pull origin main --ff-only
-            $COMPOSER install --no-dev --prefer-dist --optimize-autoloader
-            $PHP artisan migrate --force
-            $PHP artisan optimize:clear
-            $PHP artisan config:cache
-            $PHP artisan route:cache
-            $PHP artisan view:cache
-            $PHP artisan queue:restart || true
-            $PHP artisan up
+        run: |
+          echo "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          cat > /tmp/deploy_script.sh <<EOSCRIPT
+          set -e
+          cd "\$DEPLOY_PATH"
+          PHP=${{ env.SERVER_PHP_BIN }}
+          COMPOSER=${{ env.SERVER_COMPOSER_BIN }}
+          \$PHP artisan down --render="errors::503" --retry=60 || true
+          git pull origin main --ff-only
+          \$COMPOSER install --no-dev --prefer-dist --optimize-autoloader
+          \$PHP artisan migrate --force
+          \$PHP artisan optimize:clear
+          \$PHP artisan config:cache
+          \$PHP artisan route:cache
+          \$PHP artisan view:cache
+          \$PHP artisan queue:restart || true
+          \$PHP artisan up
+          EOSCRIPT
+          # Mismo backoff creciente que en la subida de assets: si el
+          # timeout es por bloqueo temporal de IP o carga del nodo
+          # compartido, reintentar pegado no ayuda en nada.
+          for attempt in 1 2 3 4; do
+            ssh -i /tmp/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+              "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" < /tmp/deploy_script.sh \
+            && { echo "Deploy succeeded on attempt $attempt"; break; } \
+            || { echo "Attempt $attempt failed"; [ $attempt -lt 4 ] && sleep $((30 * attempt)); }
+          done
+          rm -f /tmp/deploy_key /tmp/deploy_script.sh
 
   deploy-staging:
     needs: tests
@@ -216,39 +229,52 @@ jobs:
         run: |
           echo "$SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
-          for attempt in 1 2 3; do
+          # Ver comentario equivalente en el job "deploy" sobre el backoff
+          # creciente (30s/60s/120s).
+          for attempt in 1 2 3 4; do
             rsync -az --delete \
               -e "ssh -i /tmp/deploy_key -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30" \
               public/build/ \
               "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/build/" \
             && { echo "Upload succeeded on attempt $attempt"; break; } \
-            || { echo "Attempt $attempt failed"; [ $attempt -lt 3 ] && sleep 15; }
+            || { echo "Attempt $attempt failed"; [ $attempt -lt 4 ] && sleep $((30 * attempt)); }
           done
           rm -f /tmp/deploy_key
 
       - name: Deploy over SSH
         if: steps.check.outputs.ready == 'true'
-        uses: appleboy/ssh-action@v1
         env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          envs: DEPLOY_PATH
-          script: |
-            set -e
-            cd "$DEPLOY_PATH"
-            PHP=${{ env.SERVER_PHP_BIN }}
-            COMPOSER=${{ env.SERVER_COMPOSER_BIN }}
-            $PHP artisan down --render="errors::503" --retry=60 || true
-            git pull origin dev --ff-only
-            $COMPOSER install --no-dev --prefer-dist --optimize-autoloader
-            $PHP artisan migrate --force
-            $PHP artisan optimize:clear
-            $PHP artisan config:cache
-            $PHP artisan route:cache
-            $PHP artisan view:cache
-            $PHP artisan queue:restart || true
-            $PHP artisan up
+        run: |
+          echo "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          cat > /tmp/deploy_script.sh <<EOSCRIPT
+          set -e
+          cd "\$DEPLOY_PATH"
+          PHP=${{ env.SERVER_PHP_BIN }}
+          COMPOSER=${{ env.SERVER_COMPOSER_BIN }}
+          \$PHP artisan down --render="errors::503" --retry=60 || true
+          git pull origin dev --ff-only
+          \$COMPOSER install --no-dev --prefer-dist --optimize-autoloader
+          \$PHP artisan migrate --force
+          \$PHP artisan optimize:clear
+          \$PHP artisan config:cache
+          \$PHP artisan route:cache
+          \$PHP artisan view:cache
+          \$PHP artisan queue:restart || true
+          \$PHP artisan up
+          EOSCRIPT
+          # Mismo backoff creciente que en la subida de assets: si el
+          # timeout es por bloqueo temporal de IP o carga del nodo
+          # compartido, reintentar pegado no ayuda en nada.
+          for attempt in 1 2 3 4; do
+            ssh -i /tmp/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+              "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" < /tmp/deploy_script.sh \
+            && { echo "Deploy succeeded on attempt $attempt"; break; } \
+            || { echo "Attempt $attempt failed"; [ $attempt -lt 4 ] && sleep $((30 * attempt)); }
+          done
+          rm -f /tmp/deploy_key /tmp/deploy_script.sh

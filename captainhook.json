@@ -8,7 +8,7 @@
         "bootstrap": "vendor/autoload.php",
         "run": {
             "mode": "docker",
-            "exec": "./vendor/bin/sail exec laravel.test"
+            "exec": "env WWWUSER=$(id -u) WWWGROUP=$(id -g) docker compose run --rm --no-deps laravel.test"
         }
     },
     "commit-msg": {
