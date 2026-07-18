@@ -34,7 +34,7 @@ jobs:
           --health-retries=5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -93,7 +93,7 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
         run: echo "ready=${{ env.SSH_HOST != '' }}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.check.outputs.ready == 'true'
 
       - uses: shivammathur/setup-php@v2
@@ -194,7 +194,7 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
         run: echo "ready=${{ env.SSH_HOST != '' }}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.check.outputs.ready == 'true'
 
       - uses: shivammathur/setup-php@v2
